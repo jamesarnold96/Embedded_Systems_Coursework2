@@ -82,6 +82,7 @@ void commInFn(){
             else if(newCmd[0] == 'V'){
                     sscanf(newCmd, "V%f", &maxSpeed);
                     //pulseWidth = /newSpeed
+					putMessage(9,maxSpeed);
                 }
             //set motor torque
             else if(newCmd[0] == 'T'){
@@ -122,43 +123,7 @@ void commOutFn(){
     
 // --------------------------------------------------------------------------------------------------------------------------------
 // Motor control functions
-int32_t motorPosition;
-int64_t motorVelocity;
-Mutex motorVelocity_mutex;
-int32_t counter=0;
 
-void motorCtrlTick(){
- motorCtrlT.signal_set(0x1);
- }
-
-void motorCtrlFn(){
-    static int32_t oldmotorPosition;
-	// Timer to count time passed between ticks to enable accurate velocity calculation
-	Timer motorTime;
-	motTime.start();
-	// local copy of motorPosition to avoid concurrent access
-	int32_t motorPos;
-    Ticker motorCtrlTicker;
-    motorCtrlTicker.attach_us(&motorCtrlTick,100000);
-    while(1){
-        motorCtrlT.signal_wait(0x1);
-		motorPos = motorPosition;
-		motorVelocity_mutex.lock();
-        motorVelocity = abs(oldmotorPosition - motorPos)*(1000000/motorTime.read_us()); 
-        motorVelocity_mutex.unlock();
-		oldmotorPosition = motorPos;
-		motorTime.reset();
-        counter++;
-        if(counter == 10){
-            counter = 0;
-			putMessage(3,motorPos);
-			motorVelocity_mutex.lock();
-			putMessage(4,motorVelocity);
-			motorVelocity_mutex.unlock();
-        }
-		motorPosition = motorPos;
-    }
-}
 //Mapping from sequential drive states to motor phase outputs
 /*
 State   L1  L2  L3
@@ -179,7 +144,65 @@ const int8_t stateMap[] = {0x07,0x05,0x03,0x04,0x01,0x00,0x02,0x07};
 //const int8_t stateMap[] = {0x07,0x01,0x03,0x02,0x05,0x00,0x04,0x07}; //Alternative if phase order of input or drive is reversed
 
 //Phase lead to make motor spin
-const int8_t lead = -2;  //2 for forwards, -2 for backwards
+int8_t lead = -2;  //2 for forwards, -2 for backwards
+
+int32_t motorPosition;
+int64_t motorVelocity;
+Mutex motorVelocity_mutex;
+int32_t counter=0;
+
+void motorCtrlTick(){
+ motorCtrlT.signal_set(0x1);
+ }
+
+void motorCtrlFn(){
+    static int32_t oldmotorPosition;
+	// Timer to count time passed between ticks to enable accurate velocity calculation
+	Timer motorTime;
+	motrTime.start();
+	// local copy of motorPosition to avoid concurrent access
+	int32_t motorPos;
+	float ys; // proportional motor speed controller
+	float kp = 25; // proportional constant of speed controller
+    Ticker motorCtrlTicker;
+    motorCtrlTicker.attach_us(&motorCtrlTick,100000);
+    while(1){
+        motorCtrlT.signal_wait(0x1);
+		motorPos = motorPosition;
+		motorVelocity_mutex.lock();
+        motorVelocity = abs(oldmotorPosition - motorPos)*(1000000/motorTime.read_us()); 
+		motorVelocity_mutex.unlock();
+		motorVelocity_mutex.lock();
+		ys = kp*(maxSpeed - motorVelocity);
+		motorVelocity_mutex.unlock();
+		oldmotorPosition = motorPos;
+		motorTime.reset();
+		if(maxSpeed !=0 ){
+			if(ys >= 0) {
+				lead = 2;
+			}
+			else { 
+				lead = -2;
+				ys *= -1;
+			}
+			if(ys >= 1000) {
+				ys = 1000;
+			}
+		} else {
+			ys = 1000;
+		}
+		pulseWidth = ys;
+        counter++;
+        if(counter == 10){
+            counter = 0;
+			putMessage(3,motorPos);
+			motorVelocity_mutex.lock();
+			putMessage(4,motorVelocity);
+			motorVelocity_mutex.unlock();
+        }
+		motorPosition = motorPos;
+    }
+}
 
 //Status LED
 DigitalOut led1(LED1);
@@ -299,7 +322,6 @@ int main() {
     
     // Run the motor synchronisation
     pc.printf("Rotor origin: %x\n\r", orState);
-    pulseWidth = 300;
     // motor controlling interrupt routines
     I1.rise(&motorISR);
     I1.fall(&motorISR);
