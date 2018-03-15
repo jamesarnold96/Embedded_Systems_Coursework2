@@ -19,8 +19,8 @@
 #define L3Lpin D9           //0x10
 #define L3Hpin D10          //0x20
 
-Thread commOutT;
-Thread commInT;
+Thread commOutT(osPriorityNormal,1024);
+Thread commInT(osPriorityNormal,1024);
 Thread motorCtrlT(osPriorityNormal,1024);
 RawSerial pc(SERIAL_TX, SERIAL_RX);
 // Serial pc(SERIAL_TX, SERIAL_RX);
@@ -28,7 +28,7 @@ Queue<void,8> inCharQ;
 volatile uint64_t newKey;
 volatile float newRev;
 volatile float maxSpeed;
-uint32_t newTorque;
+uint32_t pulseWidth;
 
 Mutex newKey_mutex;
 
@@ -81,11 +81,11 @@ void commInFn(){
             }
             else if(newCmd[0] == 'V'){
                     sscanf(newCmd, "V%f", &maxSpeed);
-                    //newTorque = /newSpeed
+                    //pulseWidth = /newSpeed
                 }
             //set motor torque
             else if(newCmd[0] == 'T'){
-                    sscanf(newCmd, "T%d", &newTorque);
+                    sscanf(newCmd, "T%d", &pulseWidth);
                 }
         }
     }
@@ -105,16 +105,16 @@ void commOutFn(){
 				pMessage->data);
 				break;
 			case 3:
-				//pc.printf("Motor position %d\n\r",
-				//pMessage->data);
+				pc.printf("Motor position %d\n\r",
+				pMessage->data);
 				break;
 			case 4:
-				//pc.printf("Motor velocity %d\n\r",
-				//pMessage->data);
+				pc.printf("Motor velocity %d\n\r",
+				pMessage->data);
 				break;
 			default:
-				//pc.printf("Message %d with data 0x%016x\n\r",
-				//pMessage-> code, pMessage->data);
+				pc.printf("Message %d with data 0x%016x\n\r",
+				pMessage-> code, pMessage->data);
         }
         outMessages.free(pMessage);
     }
@@ -141,7 +141,7 @@ void motorCtrlFn(){
     Ticker motorCtrlTicker;
     motorCtrlTicker.attach_us(&motorCtrlTick,100000);
     while(1){
-       /* motorCtrlT.signal_wait(0x1);
+        motorCtrlT.signal_wait(0x1);
 		motorVelocity_mutex.lock();
         motorVelocity = abs(oldmotorPosition - motorPos)*10;//t.read_us(); 
         motorVelocity_mutex.unlock();
@@ -154,9 +154,9 @@ void motorCtrlFn(){
 			motorVelocity_mutex.lock();
 			putMessage(4,motorVelocity);
 			motorVelocity_mutex.unlock();
-        }*/
+        }
+		motorPosition = motorPos;
     }
-	motorPosition = motorPos;
 }
 //Mapping from sequential drive states to motor phase outputs
 /*
@@ -245,8 +245,8 @@ void motorISR() {
     static int8_t oldRotorState;
     //intState = readRotorState();
     int8_t rotorState = readRotorState();
-    motorOut((rotorState-orState+lead+6)%6,newTorque); //+6 to make sure the remainder is positive
-    if (rotorState - oldRotorState == 5 ) motorPosition--;
+    motorOut((rotorState-orState+lead+6)%6,pulseWidth); //+6 to make sure the remainder is positive
+    if (rotorState - oldRotorState == 5) motorPosition--;
     else if (rotorState - oldRotorState == -5) motorPosition++;
     else motorPosition += (rotorState - oldRotorState);
     oldRotorState = rotorState;
@@ -289,14 +289,16 @@ void rxCallback() {
 //Main
 int main() {
 	//set up pwm period
-    commOutT.start(commOutFn);
-    commInT.start(commInFn);
     
+    motorCtrlT.start(motorCtrlFn);
+	pc.printf("Rotor origin: %x\n\r", orState);
+	commOutT.start(commOutFn);
+    commInT.start(commInFn);
     //pc.attach(&rxCallback);
     
     // Run the motor synchronisation
     pc.printf("Rotor origin: %x\n\r", orState);
-    
+    pulseWidth = 300;
     // motor controlling interrupt routines
     I1.rise(&motorISR);
     I1.fall(&motorISR);
@@ -304,7 +306,7 @@ int main() {
     I2.fall(&motorISR);
     I3.rise(&motorISR);
     I3.fall(&motorISR);
-	//motorCtrlT.start(motorCtrlFn);
+	
     // mining bitcoins
     SHA256 mine;
     uint8_t sequence[] = {
