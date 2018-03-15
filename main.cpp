@@ -77,7 +77,8 @@ void commInFn(){
                 //putMessage(3,124); 
             }
             else if(newCmd[0] == 'R'){
-                    sscanf(newCmd, "R%f", &newRev);            
+                    sscanf(newCmd, "R%f", &newRev);  
+					putMessage(8,newRev);					
             }
             else if(newCmd[0] == 'V'){
                     sscanf(newCmd, "V%f", &maxSpeed);
@@ -155,28 +156,40 @@ void motorCtrlTick(){
  motorCtrlT.signal_set(0x1);
  }
 
-void motorCtrlFn(){
+void motorCtrlFn(){ // work out whether variable types are correct 
     static int32_t oldmotorPosition;
+	int32_t error = 0; // Difference between current position and specified position
+	int32_t oldError = 0;
 	// Timer to count time passed between ticks to enable accurate velocity calculation
 	Timer motorTime;
-	motrTime.start();
+	motorTime.start();
 	// local copy of motorPosition to avoid concurrent access
 	int32_t motorPos;
 	float ys; // proportional motor speed controller
-	float kp = 25; // proportional constant of speed controller
+	float yr; // differential motor position controller
+	float kp = 18; // proportional constant of speed controller
+	float kd = 12; // Differential constant of position controller
     Ticker motorCtrlTicker;
     motorCtrlTicker.attach_us(&motorCtrlTick,100000);
     while(1){
         motorCtrlT.signal_wait(0x1);
 		motorPos = motorPosition;
 		motorVelocity_mutex.lock();
-        motorVelocity = abs(oldmotorPosition - motorPos)*(1000000/motorTime.read_us()); 
+        motorVelocity = abs(oldmotorPosition - motorPos)*(10);//00000/motorTime.read_us()); 
 		motorVelocity_mutex.unlock();
 		motorVelocity_mutex.lock();
-		ys = kp*(maxSpeed - motorVelocity);
+		error = newRev - motorPos;
+		//ys = kp*(maxSpeed - motorVelocity);
+		yr = kp*error + kd*(error - oldError)*10; 
 		motorVelocity_mutex.unlock();
 		oldmotorPosition = motorPos;
 		motorTime.reset();
+		// see if these if statement can be merged at some point. THIS ISN'T GOING TO BE PERMANENT
+		if(yr >= 0) {
+			lead = 2;
+		} else {
+			lead = -2
+		}/*
 		if(maxSpeed !=0 ){
 			if(ys >= 0) {
 				lead = 2;
@@ -190,8 +203,8 @@ void motorCtrlFn(){
 			}
 		} else {
 			ys = 1000;
-		}
-		pulseWidth = ys;
+		}*/
+		pulseWidth = yr;
         counter++;
         if(counter == 10){
             counter = 0;
@@ -201,6 +214,7 @@ void motorCtrlFn(){
 			motorVelocity_mutex.unlock();
         }
 		motorPosition = motorPos;
+		oldError = error; 
     }
 }
 
@@ -254,7 +268,7 @@ int8_t motorHome() {
 	L1L.period_us(2000);
     L2L.period_us(2000);
     L3L.period_us(2000);
-    motorOut(0, 1000);
+    motorOut(0, 200);
     wait(1.0);
     
     //Get the rotor state
