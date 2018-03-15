@@ -1,5 +1,5 @@
 #include "mbed.h"
-#include "Crypto.h"
+#include "Crypto_light.h"
 #include "rtos.h"
 
 //Photointerrupter input pins
@@ -70,7 +70,7 @@ void commInFn(){
                 sscanf(newCmd, "K%x", &newKey); //Decode the command
                 newKey_mutex.unlock();
                 putMessage(3,124); 
-            }
+            } 
         }
     }
 }
