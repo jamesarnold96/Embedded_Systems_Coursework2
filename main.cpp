@@ -134,19 +134,20 @@ void motorCtrlTick(){
 void motorCtrlFn(){
     static int32_t oldmotorPosition;
 	// Timer to count time passed between ticks to enable accurate velocity calculation
-	//Timer t;
-	//t.start();
+	Timer motorTime;
+	motTime.start();
 	// local copy of motorPosition to avoid concurrent access
-	int32_t motorPos = motorPosition;
+	int32_t motorPos;
     Ticker motorCtrlTicker;
     motorCtrlTicker.attach_us(&motorCtrlTick,100000);
     while(1){
         motorCtrlT.signal_wait(0x1);
+		motorPos = motorPosition;
 		motorVelocity_mutex.lock();
-        motorVelocity = abs(oldmotorPosition - motorPos)*10;//t.read_us(); 
+        motorVelocity = abs(oldmotorPosition - motorPos)*(1000000/motorTime.read_us()); 
         motorVelocity_mutex.unlock();
 		oldmotorPosition = motorPos;
-		// t.reset();
+		motorTime.reset();
         counter++;
         if(counter == 10){
             counter = 0;
