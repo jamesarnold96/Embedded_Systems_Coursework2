@@ -77,7 +77,7 @@ void commInFn(){
                 //putMessage(3,124); 
             }
             else if(newCmd[0] == 'R'){
-                    sscanf(newCmd, "R%f", &newRev);  
+                    sscanf(newCmd, "R%f", &newRev); 
 					putMessage(8,newRev);					
             }
             else if(newCmd[0] == 'V'){
@@ -156,68 +156,6 @@ void motorCtrlTick(){
  motorCtrlT.signal_set(0x1);
  }
 
-void motorCtrlFn(){ // work out whether variable types are correct 
-    static int32_t oldmotorPosition;
-	int32_t error = 0; // Difference between current position and specified position
-	int32_t oldError = 0;
-	// Timer to count time passed between ticks to enable accurate velocity calculation
-	Timer motorTime;
-	motorTime.start();
-	// local copy of motorPosition to avoid concurrent access
-	int32_t motorPos;
-	float ys; // proportional motor speed controller
-	float yr; // differential motor position controller
-	float kp = 18; // proportional constant of speed controller
-	float kd = 12; // Differential constant of position controller
-    Ticker motorCtrlTicker;
-    motorCtrlTicker.attach_us(&motorCtrlTick,100000);
-    while(1){
-        motorCtrlT.signal_wait(0x1);
-		motorPos = motorPosition;
-		motorVelocity_mutex.lock();
-        motorVelocity = abs(oldmotorPosition - motorPos)*(10);//00000/motorTime.read_us()); 
-		motorVelocity_mutex.unlock();
-		motorVelocity_mutex.lock();
-		error = newRev - motorPos;
-		//ys = kp*(maxSpeed - motorVelocity);
-		yr = kp*error + kd*(error - oldError)*10; 
-		motorVelocity_mutex.unlock();
-		oldmotorPosition = motorPos;
-		motorTime.reset();
-		// see if these if statement can be merged at some point. THIS ISN'T GOING TO BE PERMANENT
-		if(yr >= 0) {
-			lead = 2;
-		} else {
-			lead = -2
-		}/*
-		if(maxSpeed !=0 ){
-			if(ys >= 0) {
-				lead = 2;
-			}
-			else { 
-				lead = -2;
-				ys *= -1;
-			}
-			if(ys >= 1000) {
-				ys = 1000;
-			}
-		} else {
-			ys = 1000;
-		}*/
-		pulseWidth = yr;
-        counter++;
-        if(counter == 10){
-            counter = 0;
-			putMessage(3,motorPos);
-			motorVelocity_mutex.lock();
-			putMessage(4,motorVelocity);
-			motorVelocity_mutex.unlock();
-        }
-		motorPosition = motorPos;
-		oldError = error; 
-    }
-}
-
 //Status LED
 DigitalOut led1(LED1);
 
@@ -288,6 +226,105 @@ void motorISR() {
     else if (rotorState - oldRotorState == -5) motorPosition++;
     else motorPosition += (rotorState - oldRotorState);
     oldRotorState = rotorState;
+}
+
+void motorCtrlFn(){ // work out whether variable types are correct 
+    static int32_t oldmotorPosition;
+	int32_t error = 0; // Difference between current position and specified position
+	int32_t oldError = 0;
+	int8_t errorSign = 1;
+	// Timer to count time passed between ticks to enable accurate velocity calculation
+	Timer motorTime;
+	motorTime.start();
+	// local copy of motorPosition to avoid concurrent access
+	int32_t motorPos;
+	float ys; // proportional motor speed controller
+	float yr; // differential motor position controller
+	float kp = 18; // proportional constant of speed controller
+	float kd = 12; // Differential constant of position controller
+	float ki = 0.01; // Integral constant to prevent stiction 
+	int32_t oldErrors[10]; // Array of old errors to allow integration
+	int32_t errorSum;
+	int8_t leadys = -2;  // Set different leads depending on which controller is being used
+	int8_t leadyr = -2; 
+    Ticker motorCtrlTicker;
+    motorCtrlTicker.attach_us(&motorCtrlTick,100000);
+    while(1){
+        motorCtrlT.signal_wait(0x1);
+		motorPos = motorPosition;
+		error = newRev*6 - motorPos; // Array of previous 10 errors, to enable calculation of the integral
+		errorSum = 0;
+		if (error >= 0) errorSign = 1;
+		else errorSign = -1;
+		for(uint8_t i = 9; i>0; i--) {
+			oldErrors[i] = oldErrors[i-1];
+			errorSum += oldErrors[i];
+		}
+		oldErrors[0] = error;
+		errorSum += oldErrors[0]; 
+		motorVelocity_mutex.lock();
+        motorVelocity = (motorPos - oldmotorPosition)*10;//motorTime.read_us()); 
+		ys = kp*(maxSpeed - abs(motorVelocity))*errorSign;
+		motorVelocity_mutex.unlock();
+		yr = kp*error + kd*(error - oldError)*10 + ki*errorSum; 
+		oldmotorPosition = motorPos;
+		motorTime.reset();
+		// see if these if statement can be merged at some point. THIS ISN'T GOING TO BE PERMANENT
+		if(yr >= 0) {
+			leadyr = 2;
+		} else {
+			leadyr = -2;
+		}
+		if(maxSpeed !=0 ){
+			if(ys >= 0) {
+				leadys = 2;
+			}
+			else { 
+				leadys = -2;
+			}
+			if(ys >= 1000) {
+				ys = 1000;
+			}
+			if(ys <= -1000) {
+				ys = -1000;
+			}
+		} else {
+			ys = 1000;
+		}
+		motorVelocity_mutex.lock();
+		if(motorVelocity < 0){
+			if(ys >= yr){
+				pulseWidth = abs(ys);
+				lead = leadys;
+			} else {
+				pulseWidth = abs(yr);
+				lead = leadyr;
+			}
+		} else {
+			if (ys <= yr){
+				pulseWidth = abs(ys);
+				lead = leadys;
+			} else {
+				pulseWidth = abs(yr);
+				lead = leadyr;
+			}
+		}
+		if((motorVelocity == 0) && ((error >= 6)||(error <= -6))) {
+			pulseWidth = 1000;
+			motorISR();
+		}
+		motorVelocity_mutex.unlock();
+        counter++;
+        if(counter == 10){
+            counter = 0;
+			putMessage(3,motorPos);
+			motorVelocity_mutex.lock();
+			putMessage(4,motorVelocity);
+			motorVelocity_mutex.unlock();
+        }
+		motorPosition = motorPos;
+		oldError = error; 
+    }
 }
 
 // ------------------------------------------------------------------------------------
