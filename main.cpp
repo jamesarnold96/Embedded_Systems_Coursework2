@@ -27,7 +27,7 @@ RawSerial pc(SERIAL_TX, SERIAL_RX);
 Queue<void,8> inCharQ;
 volatile uint64_t newKey;
 volatile float newRev;
-volatile float maxSpeed;
+volatile float maxSpeed = 300;
 uint32_t pulseWidth;
 
 Mutex newKey_mutex;
@@ -78,16 +78,17 @@ void commInFn(){
             }
             else if(newCmd[0] == 'R'){
                     sscanf(newCmd, "R%f", &newRev); 
-					putMessage(8,newRev);					
+                    putMessage(6,newRev);                   
             }
             else if(newCmd[0] == 'V'){
                     sscanf(newCmd, "V%f", &maxSpeed);
                     //pulseWidth = /newSpeed
-					putMessage(9,maxSpeed);
+                    putMessage(5,maxSpeed);
                 }
             //set motor torque
             else if(newCmd[0] == 'T'){
                     sscanf(newCmd, "T%d", &pulseWidth);
+					putMessage(5,pulseWidth);
                 }
         }
     }
@@ -97,26 +98,38 @@ void commOutFn(){
     while (1) {
         osEvent newEvent = outMessages.get();
         message_t *pMessage = (message_t*)newEvent.value.p;
-		switch(pMessage->code){
-			case 1:
-				pc.printf("Hash rate 0x%016x\n\r",
-				pMessage->data);
-				break;
-        	case 2:
-				pc.printf("Hash computed 0x%016x\n\r",
-				pMessage->data);
-				break;
-			case 3:
-				pc.printf("Motor position %d\n\r",
-				pMessage->data);
-				break;
-			case 4:
-				pc.printf("Motor velocity %d\n\r",
-				pMessage->data);
-				break;
-			default:
-				pc.printf("Message %d with data 0x%016x\n\r",
-				pMessage-> code, pMessage->data);
+        switch(pMessage->code){
+            case 1:
+                pc.printf("Hash rate 0x%016x\n\r",
+                pMessage->data);
+                break;
+            case 2:
+                pc.printf("Hash computed 0x%016x\n\r",
+                pMessage->data);
+                break;
+            case 3:
+                pc.printf("Motor position %d\n\r",
+                pMessage->data);
+                break;
+            case 4:
+                pc.printf("Motor velocity %d\n\r",
+                pMessage->data);
+                break;
+            case 5:
+                pc.printf("Max Speed %d\n\r",
+                pMessage->data);
+                break;
+            case 6:
+                pc.printf("Position set to %d\n\r",
+                pMessage->data);
+                break;
+			case :
+				pc.printf("Motor torque set to %d\n\r",
+                pMessage->data);
+                break;
+            default:
+                pc.printf("Message %d with data 0x%016x\n\r",
+                pMessage-> code, pMessage->data);
         }
         outMessages.free(pMessage);
     }
@@ -203,7 +216,7 @@ inline int8_t readRotorState(){
 //Basic synchronisation routine    
 int8_t motorHome() {
     //Put the motor in drive state 0 and wait for it to stabilise
-	L1L.period_us(2000);
+    L1L.period_us(2000);
     L2L.period_us(2000);
     L3L.period_us(2000);
     motorOut(0, 200);
@@ -230,100 +243,102 @@ void motorISR() {
 
 void motorCtrlFn(){ // work out whether variable types are correct 
     static int32_t oldmotorPosition;
-	int32_t error = 0; // Difference between current position and specified position
-	int32_t oldError = 0;
-	int8_t errorSign = 1;
-	// Timer to count time passed between ticks to enable accurate velocity calculation
-	Timer motorTime;
-	motorTime.start();
-	// local copy of motorPosition to avoid concurrent access
-	int32_t motorPos;
-	float ys; // proportional motor speed controller
-	float yr; // differential motor position controller
-	float kp = 18; // proportional constant of speed controller
-	float kd = 12; // Differential constant of position controller
-	float ki = 0.01; // Integral constant to prevent stiction 
-	int32_t oldErrors[10]; // Array of old errors to allow integration
-	int32_t errorSum;
-	int8_t leadys = -2;  // Set different leads depending on which controller is being used
-	int8_t leadyr = -2; 
+    int32_t error = 0; // Difference between current position and specified position
+    int32_t oldError = 0;
+    int8_t errorSign = 1;
+    // Timer to count time passed between ticks to enable accurate velocity calculation
+    Timer motorTime;
+    motorTime.start();
+    // local copy of motorPosition to avoid concurrent access
+    int32_t motorPos;
+    float ys; // proportional motor speed controller
+    float yr; // differential motor position controller
+    float kp = 18.5; // proportional constant of speed controller
+    float kd = 12.5; // Differential constant of position controller
+    float ki = 0.01; // Integral constant to prevent stiction 
+    int32_t oldErrors[10]; // Array of old errors to allow integration
+    int32_t errorSum;
+    int8_t leadys = -2;  // Set different leads depending on which controller is being used
+    int8_t leadyr = -2; 
     Ticker motorCtrlTicker;
     motorCtrlTicker.attach_us(&motorCtrlTick,100000);
     while(1){
         motorCtrlT.signal_wait(0x1);
-		motorPos = motorPosition;
-		error = newRev*6 - motorPos; // Array of previous 10 errors, to enable calculation of the integral
-		errorSum = 0;
-		if (error >= 0) errorSign = 1;
-		else errorSign = -1;
-		for(uint8_t i = 9; i>0; i--) {
-			oldErrors[i] = oldErrors[i-1];
-			errorSum += oldErrors[i];
-		}
-		oldErrors[0] = error;
-		errorSum += oldErrors[0]; 
-		motorVelocity_mutex.lock();
+        motorPos = motorPosition;
+        error = newRev*6 - motorPos; 
+        errorSum = 0;
+        if (error >= 0) errorSign = 1;
+        else errorSign = -1;
+        for(uint8_t i = 9; i>0; i--) {
+            oldErrors[i] = oldErrors[i-1];
+            errorSum += oldErrors[i];
+        }
+        oldErrors[0] = error;
+        errorSum += oldErrors[0]; 
+        motorVelocity_mutex.lock();
         motorVelocity = (motorPos - oldmotorPosition)*10;//motorTime.read_us()); 
-		ys = kp*(maxSpeed - abs(motorVelocity))*errorSign;
-		motorVelocity_mutex.unlock();
-		yr = kp*error + kd*(error - oldError)*10 + ki*errorSum; 
-		oldmotorPosition = motorPos;
-		motorTime.reset();
-		// see if these if statement can be merged at some point. THIS ISN'T GOING TO BE PERMANENT
-		if(yr >= 0) {
-			leadyr = 2;
-		} else {
-			leadyr = -2;
-		}
-		if(maxSpeed !=0 ){
-			if(ys >= 0) {
-				leadys = 2;
-			}
-			else { 
-				leadys = -2;
-			}
-			if(ys >= 1000) {
-				ys = 1000;
-			}
-			if(ys <= -1000) {
-				ys = -1000;
-			}
-		} else {
-			ys = 1000;
-		}
-		motorVelocity_mutex.lock();
-		if(motorVelocity < 0){
-			if(ys >= yr){
-				pulseWidth = abs(ys);
-				lead = leadys;
-			} else {
-				pulseWidth = abs(yr);
-				lead = leadyr;
-			}
-		} else {
-			if (ys <= yr){
-				pulseWidth = abs(ys);
-				lead = leadys;
-			} else {
-				pulseWidth = abs(yr);
-				lead = leadyr;
-			}
-		}
-		if((motorVelocity == 0) && ((error >= 6)||(error <= -6))) {
-			pulseWidth = 1000;
-			motorISR();
-		}
-		motorVelocity_mutex.unlock();
+        ys = kp*(maxSpeed - abs(motorVelocity))*errorSign;
+        motorVelocity_mutex.unlock();
+        yr = kp*error + kd*(error - oldError)*10;// + ki*errorSum; 
+        oldmotorPosition = motorPos;
+        motorTime.reset();
+        if(yr >= 0) {
+            leadyr = 2;
+        } else {
+            leadyr = -2;
+        }
+        if(maxSpeed !=0 ){
+            if(ys >= 0) {
+                leadys = 2;
+            }
+            else { 
+                leadys = -2;
+            }
+            if(ys >= 1000) {
+                ys = 1000;
+            }
+            if(ys <= -1000) {
+                ys = -1000;
+            }
+        } else {
+            ys = 1000;
+        }
+        motorVelocity_mutex.lock();
+        if(motorVelocity < 0){
+            if(ys >= yr){
+                pulseWidth = abs(ys);
+                lead = leadys;
+            } else {
+                pulseWidth = abs(yr);
+                lead = leadyr;
+            }
+        } else {
+            if (ys <= yr){
+                pulseWidth = abs(ys);
+                lead = leadys;
+            } else {
+                pulseWidth = abs(yr);
+                lead = leadyr;
+            }
+        }
+		// "Jump-starts" the motor from a stationary position
+        if((motorVelocity == 0) && ((error >= 6)||(error <= -6))) { 
+			// Allows the motor to "jump start" when the direction is negative
+            if(lead = -2){ 
+                lead = -1;
+            }
+            motorISR();
+        }
+        motorVelocity_mutex.unlock();
         counter++;
         if(counter == 10){
             counter = 0;
-			putMessage(3,motorPos);
-			motorVelocity_mutex.lock();
-			putMessage(4,motorVelocity);
-			motorVelocity_mutex.unlock();
+            putMessage(3,motorPos);
+            motorVelocity_mutex.lock();
+            putMessage(4,motorVelocity);
+            motorVelocity_mutex.unlock();
         }
-		motorPosition = motorPos;
-		oldError = error; 
+        oldError = error; 
     }
 }
 
@@ -363,11 +378,11 @@ void rxCallback() {
 // -------------------------------------------------------------------------------------------------------------------------
 //Main
 int main() {
-	//set up pwm period
+    //set up pwm period
     
     motorCtrlT.start(motorCtrlFn);
-	pc.printf("Rotor origin: %x\n\r", orState);
-	commOutT.start(commOutFn);
+    pc.printf("Rotor origin: %x\n\r", orState);
+    commOutT.start(commOutFn);
     commInT.start(commInFn);
     //pc.attach(&rxCallback);
     
@@ -380,7 +395,7 @@ int main() {
     I2.fall(&motorISR);
     I3.rise(&motorISR);
     I3.fall(&motorISR);
-	
+    
     // mining bitcoins
     SHA256 mine;
     uint8_t sequence[] = {
