@@ -29,6 +29,8 @@ volatile uint64_t newKey;
 volatile float newRev;
 volatile float maxSpeed = 300;
 uint32_t pulseWidth;
+int32_t motorPosition_at_command;
+int32_t motorPosition;
 
 Mutex newKey_mutex;
 
@@ -78,7 +80,8 @@ void commInFn(){
             }
             else if(newCmd[0] == 'R'){
                     sscanf(newCmd, "R%f", &newRev); 
-                    putMessage(6,newRev);                   
+                    putMessage(6,newRev); 
+					motorPosition_at_command = motorPosition;
             }
             else if(newCmd[0] == 'V'){
                     sscanf(newCmd, "V%f", &maxSpeed);
@@ -123,7 +126,7 @@ void commOutFn(){
                 pc.printf("Position set to %d\n\r",
                 pMessage->data);
                 break;
-			case :
+			case 7:
 				pc.printf("Motor torque set to %d\n\r",
                 pMessage->data);
                 break;
@@ -160,7 +163,7 @@ const int8_t stateMap[] = {0x07,0x05,0x03,0x04,0x01,0x00,0x02,0x07};
 //Phase lead to make motor spin
 int8_t lead = -2;  //2 for forwards, -2 for backwards
 
-int32_t motorPosition;
+
 int64_t motorVelocity;
 Mutex motorVelocity_mutex;
 int32_t counter=0;
@@ -265,7 +268,7 @@ void motorCtrlFn(){ // work out whether variable types are correct
     while(1){
         motorCtrlT.signal_wait(0x1);
         motorPos = motorPosition;
-        error = newRev*6 - motorPos; 
+        error = newRev*6 + motorPosition_at_command - motorPos; 
         errorSum = 0;
         if (error >= 0) errorSign = 1;
         else errorSign = -1;
@@ -324,7 +327,7 @@ void motorCtrlFn(){ // work out whether variable types are correct
 		// "Jump-starts" the motor from a stationary position
         if((motorVelocity == 0) && ((error >= 6)||(error <= -6))) { 
 			// Allows the motor to "jump start" when the direction is negative
-            if(lead = -2){ 
+            if(lead == -2){ 
                 lead = -1;
             }
             motorISR();
