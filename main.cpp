@@ -180,6 +180,10 @@ InterruptIn I1(I1pin);
 InterruptIn I2(I2pin);
 InterruptIn I3(I3pin);
 
+// Incremental photointerrupter inputs
+InterruptIn I4(CHA);
+InterruptIn I5(CHB);
+
 //Motor Drive outputs
 PwmOut L1L(L1Lpin);
 DigitalOut L1H(L1Hpin);
