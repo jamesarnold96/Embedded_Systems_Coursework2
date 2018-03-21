@@ -95,11 +95,6 @@ void commInFn(){
                     //pulseWidth = /newSpeed
                     putMessage(5,maxSpeed);
                 }
-            //set motor torque
-            else if(newCmd[0] == 'T'){
-                    sscanf(newCmd, "T%d", &pulseWidth);
-                    putMessage(5,pulseWidth);
-                }
         }
     }
 }
@@ -126,9 +121,6 @@ void commOutFn(){
                 break;
             case 6:
                 pc.printf("Position set to %.2f\n\r", pMessage->data);
-                break;
-            case 7:
-                pc.printf("Motor torque set to %.2f\n\r", pMessage->data);
                 break;
             case 8:
                 pc.printf("Sequence key set to 0x%016x\n\r", pMessage->data);
@@ -166,8 +158,7 @@ const int8_t stateMap[] = {0x07,0x05,0x03,0x04,0x01,0x00,0x02,0x07};
 int8_t lead = -2;  //2 for forwards, -2 for backwards
 
 
-int64_t motorVelocity;
-Mutex motorVelocity_mutex;
+int32_t motorVelocity;
 int32_t counter=0;
 
 void motorCtrlTick(){
@@ -286,12 +277,10 @@ void motorCtrlFn(){ // work out whether variable types are correct
         else errorSign = -1;
         oldErrors[0] = error*motorTime.read();
         errorSum += oldErrors[0]; 
-        motorVelocity_mutex.lock();
-        motorVelocity = (motorPos - oldmotorPosition)/motorTime.read_us();
+        motorVelocity = (motorPos - oldmotorPosition)/motorTime.read();
         oldmotorPosition = motorPos;
         ys = kp*(windingSpeed - abs(motorVelocity))*errorSign;
-        motorVelocity_mutex.unlock();
-        yr = kp*error + kd*(error - oldError)*10 + ki*errorSum; 
+        yr = kp*error + kd*(error - oldError)/motorTime.read() + ki*errorSum; 
         motorTime.reset();
         if(yr >= 0) {
             leadyr = 2;
@@ -314,7 +303,6 @@ void motorCtrlFn(){ // work out whether variable types are correct
         } else {
             ys = 1000;
         }
-        motorVelocity_mutex.lock();
         if(motorVelocity < 0){
             if(ys >= yr){
                 pulseWidth = abs(ys);
@@ -340,14 +328,11 @@ void motorCtrlFn(){ // work out whether variable types are correct
             }
             motorISR();
         }
-        motorVelocity_mutex.unlock();
         counter++;
         if(counter == 10){
             counter = 0;
-            putMessage(3,motorPos/6.0);
-            motorVelocity_mutex.lock();
-            putMessage(4,motorVelocity/6.0);
-            motorVelocity_mutex.unlock();
+            putMessage(3,(float)(motorPos/6.0));
+            putMessage(4,(float)(motorVelocity/6.0));
         }
         oldError = error; 
     }
@@ -355,7 +340,7 @@ void motorCtrlFn(){ // work out whether variable types are correct
 
 // ------------------------------------------------------------------------------------
 // Bitcoin mining code 
-int16_t hashCount = 0;
+float hashCount = 0;
 
 void calcHashRate() {
     putMessage (1, hashCount);
