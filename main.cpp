@@ -256,9 +256,9 @@ void motorCtrlFn(){ // work out whether variable types are correct
     int32_t motorPos;
     float ys; // proportional motor speed controller
     float yr; // differential motor position controller
-    float kp = 18.5; // proportional constant of speed controller
-    float kd = 12.5; // Differential constant of position controller
-    float ki = 0.01; // Integral constant to prevent stiction 
+    float kp = 18; // proportional constant of speed controller
+    float kd = 15; // Differential constant of position controller
+    float ki = 0.1; // Integral constant to prevent stiction 
     int32_t oldErrors[10]; // Array of old errors to allow integration
     int32_t errorSum;
     int8_t leadys = -2;  // Set different leads depending on which controller is being used
@@ -267,24 +267,24 @@ void motorCtrlFn(){ // work out whether variable types are correct
     motorCtrlTicker.attach_us(&motorCtrlTick,100000);
     while(1){
         motorCtrlT.signal_wait(0x1);
-        motorPos = motorPosition;
-        error = newRev*6 + motorPosition_at_command - motorPos; 
-        errorSum = 0;
-        if (error >= 0) errorSign = 1;
-        else errorSign = -1;
-        for(uint8_t i = 9; i>0; i--) {
+		errorSum = 0;
+		for(uint8_t i = 9; i>0; i--) {
             oldErrors[i] = oldErrors[i-1];
             errorSum += oldErrors[i];
         }
-        oldErrors[0] = error;
+        motorPos = motorPosition;
+        error = newRev*6 + motorPosition_at_command - motorPos; 
+        if (error >= 0) errorSign = 1;
+        else errorSign = -1;
+        oldErrors[0] = error*motorTime.read();
         errorSum += oldErrors[0]; 
         motorVelocity_mutex.lock();
-        motorVelocity = (motorPos - oldmotorPosition)*10;//motorTime.read_us()); 
+        motorVelocity = (motorPos - oldmotorPosition)/motorTime.read(); 
+		oldmotorPosition = motorPos;
         ys = kp*(maxSpeed - abs(motorVelocity))*errorSign;
         motorVelocity_mutex.unlock();
-        yr = kp*error + kd*(error - oldError)*10;// + ki*errorSum; 
-        oldmotorPosition = motorPos;
-        motorTime.reset();
+        yr = kp*error + kd*(error - oldError)/motorTime.read() + ki*errorSum; 
+		motorTime.reset();
         if(yr >= 0) {
             leadyr = 2;
         } else {
@@ -297,10 +297,10 @@ void motorCtrlFn(){ // work out whether variable types are correct
             else { 
                 leadys = -2;
             }
-            if(ys >= 1000) {
+            if(ys > 1000) {
                 ys = 1000;
             }
-            if(ys <= -1000) {
+            if(ys < -1000) {
                 ys = -1000;
             }
         } else {
