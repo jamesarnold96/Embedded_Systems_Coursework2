@@ -29,8 +29,8 @@ volatile uint64_t newKey;
 volatile float newRev;
 volatile float maxSpeed = 300;
 uint32_t pulseWidth;
-int32_t motorPosition_at_command;
-int32_t motorPosition;
+float motorPosition_at_command;
+float motorPosition;
 
 Mutex newKey_mutex;
 
@@ -176,6 +176,8 @@ InterruptIn I3(I3pin);
 // Incremental photointerrupter inputs
 InterruptIn I4(CHA);
 InterruptIn I5(CHB);
+// Fraction of one large step of one incremental step
+const float SMALL_STEP = 6/1112;
 
 //Motor Drive outputs
 PwmOut L1L(L1Lpin);
@@ -232,13 +234,28 @@ int8_t orState = motorHome();
 //int32_t motorPosition;
 void motorISR() {
     static int8_t oldRotorState;
-    //intState = readRotorState();
     int8_t rotorState = readRotorState();
     motorOut((rotorState-orState+lead+6)%6,pulseWidth); //+6 to make sure the remainder is positive
-    if (rotorState - oldRotorState == 5) motorPosition--;
-    else if (rotorState - oldRotorState == -5) motorPosition++;
+    if (rotorState - oldRotorState == 5) motorPosition --;
+    else if (rotorState - oldRotorState == -5) motorPosition ++;
     else motorPosition += (rotorState - oldRotorState);
     oldRotorState = rotorState;
+}
+
+const int8_t smallStateMap[] = {0x00,0x03,0x01,0x02};  
+
+//Convert photointerrupter inputs to a rotor state
+inline int8_t readSmallRotorState(){
+    return smallStateMap[I3 + 2*I4];
+}
+
+void smallISR() {
+	static int oldSmallRotorState;
+	int8_t smallRotorState = readSmallRotorState();
+	if (smallRotorState - oldRotorState == 5) motorPosition-= SMALL_STEP;
+    else if (rotorState - oldRotorState == -5) motorPosition+= SMALL_STEP;
+    else motorPosition += (smallRotorState - oldSmallRotorState);
+    oldSmallRotorState = smallRotorState;
 }
 
 void motorCtrlFn(){ // work out whether variable types are correct 
@@ -250,7 +267,7 @@ void motorCtrlFn(){ // work out whether variable types are correct
     Timer motorTime;
     motorTime.start();
     // local copy of motorPosition to avoid concurrent access
-    int32_t motorPos;
+    float motorPos;
     float ys; // proportional motor speed controller
     float yr; // differential motor position controller
     float kp = 18; // proportional constant of speed controller
@@ -367,6 +384,12 @@ int main() {
     I2.fall(&motorISR);
     I3.rise(&motorISR);
     I3.fall(&motorISR);
+	
+	// Small photointerrupter routine
+	I4.rise(&smallISR);
+    I4.fall(&smallISR);
+    I5.rise(&smallISR);
+    I5.fall(&smallISR);
     
     // mining bitcoins
     SHA256 mine;
