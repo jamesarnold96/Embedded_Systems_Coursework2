@@ -31,6 +31,7 @@ volatile float maxSpeed = 300;
 uint32_t pulseWidth;
 float motorPosition_at_command;
 float motorPosition;
+float smallMotorPosition;
 
 Mutex newKey_mutex;
 
@@ -250,12 +251,13 @@ inline int8_t readSmallRotorState(){
 }
 
 void smallISR() {
-	static int oldSmallRotorState;
-	int8_t smallRotorState = readSmallRotorState();
-	if (smallRotorState - oldRotorState == 5) motorPosition-= SMALL_STEP;
-    else if (rotorState - oldRotorState == -5) motorPosition+= SMALL_STEP;
-    else motorPosition += (smallRotorState - oldSmallRotorState);
+    static int oldSmallRotorState;
+    int8_t smallRotorState = readSmallRotorState();
+    if (smallRotorState - oldSmallRotorState == 3) smallMotorPosition--;
+    else if (smallRotorState - oldSmallRotorState == -3) smallMotorPosition++;
+    else smallMotorPosition += (smallRotorState - oldSmallRotorState);
     oldSmallRotorState = smallRotorState;
+    if(abs(smallMotorPosition) >= 1112/6) smallMotorPosition = 0;
 }
 
 void motorCtrlFn(){ // work out whether variable types are correct 
@@ -270,9 +272,9 @@ void motorCtrlFn(){ // work out whether variable types are correct
     float motorPos;
     float ys; // proportional motor speed controller
     float yr; // differential motor position controller
-    float kp = 18; // proportional constant of speed controller
-    float kd = 15; // Differential constant of position controller
-    float ki = 0.1; // Integral constant to prevent stiction 
+    float kp = 15; // proportional constant of speed controller
+    float kd = 11; // Differential constant of position controller
+    float ki = 0.35; // Integral constant to prevent stiction 
     int32_t oldErrors[10]; // Array of old errors to allow integration
     int32_t errorSum;
     int8_t leadys = -2;  // Set different leads depending on which controller is being used
@@ -288,13 +290,13 @@ void motorCtrlFn(){ // work out whether variable types are correct
         }
         float windingSpeed = maxSpeed*6;
         float windingRev = newRev*6;
-        motorPos = motorPosition;
+        motorPos = motorPosition;// + smallMotorPosition*SMALL_STEP;
+        motorVelocity = (motorPos - oldmotorPosition)/motorTime.read();
         error = windingRev + motorPosition_at_command - motorPos; 
         if (error >= 0) errorSign = 1;
         else errorSign = -1;
         oldErrors[0] = error*motorTime.read();
         errorSum += oldErrors[0]; 
-        motorVelocity = (motorPos - oldmotorPosition)/motorTime.read();
         oldmotorPosition = motorPos;
         ys = kp*(windingSpeed - abs(motorVelocity))*errorSign;
         yr = kp*error + kd*(error - oldError)/motorTime.read() + ki*errorSum; 
@@ -350,6 +352,7 @@ void motorCtrlFn(){ // work out whether variable types are correct
             counter = 0;
             putMessage(3,(float)(motorPos/6.0));
             putMessage(4,(float)(motorVelocity/6.0));
+            putMessage(3,SMALL_STEP);
         }
         oldError = error; 
     }
@@ -384,9 +387,9 @@ int main() {
     I2.fall(&motorISR);
     I3.rise(&motorISR);
     I3.fall(&motorISR);
-	
-	// Small photointerrupter routine
-	I4.rise(&smallISR);
+    
+    // Small photointerrupter routine
+    I4.rise(&smallISR);
     I4.fall(&smallISR);
     I5.rise(&smallISR);
     I5.fall(&smallISR);
