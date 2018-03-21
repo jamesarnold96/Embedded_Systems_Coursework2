@@ -56,6 +56,13 @@ void putMessage(uint8_t code, float data){
     pMessage -> data = data;
     outMessages.put(pMessage);
 }
+// Overloaded version of putMessage for int versions of data
+void putMessage(uint8_t code, uint64_t data){
+    message_t *pMessage = outMessages.alloc();
+    pMessage -> code = code;
+    pMessage -> data = data;
+    outMessages.put(pMessage);
+}
 
 void commInFn(){
     // array to hold each command 
