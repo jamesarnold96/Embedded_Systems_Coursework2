@@ -76,7 +76,7 @@ void commInFn(){
                 newKey_mutex.lock();
                 sscanf(newCmd, "K%x", &newKey); //Decode the command
                 newKey_mutex.unlock();
-                //putMessage(3,124); 
+                putMessage(8,newKey); 
             }
             else if(newCmd[0] == 'R'){
                     sscanf(newCmd, "R%f", &newRev); 
@@ -103,10 +103,10 @@ void commOutFn(){
         message_t *pMessage = (message_t*)newEvent.value.p;
         switch(pMessage->code){
             case 1:
-                pc.printf("Hash rate 0x%016x\n\r", pMessage->data);
+                pc.printf("Hash rate %.0f\n\r", pMessage->data);
                 break;
             case 2:
-                pc.printf("Hash computed 0x%016x\n\r", pMessage->data);
+                pc.printf("Hash computed at 0x%016x\n\r", pMessage->data);
                 break;
             case 3:
                 pc.printf("Motor position %.2f\n\r", pMessage->data);
@@ -122,6 +122,9 @@ void commOutFn(){
                 break;
             case 7:
                 pc.printf("Motor torque set to %.2f\n\r", pMessage->data);
+                break;
+            case 8:
+                pc.printf("Sequence key set to 0x%016x\n\r", pMessage->data);
                 break;
             default:
                 pc.printf("Message %d with data 0x%016x\n\r", pMessage-> code, pMessage->data);
