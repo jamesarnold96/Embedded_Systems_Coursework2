@@ -38,7 +38,7 @@ Mutex newKey_mutex;
 // Serial communication functions 
 typedef struct{
     uint8_t code;
-    uint32_t data;
+    float data;
     } message_t;
     
 Mail<message_t,16> outMessages;
@@ -50,7 +50,7 @@ void serialISR(){
  }  
  
 // uses Mail to queue messages for serial output
-void putMessage(uint8_t code, uint32_t data){
+void putMessage(uint8_t code, float data){
     message_t *pMessage = outMessages.alloc();
     pMessage -> code = code;
     pMessage -> data = data;
@@ -81,7 +81,7 @@ void commInFn(){
             else if(newCmd[0] == 'R'){
                     sscanf(newCmd, "R%f", &newRev); 
                     putMessage(6,newRev); 
-					motorPosition_at_command = motorPosition;
+                    motorPosition_at_command = motorPosition;
             }
             else if(newCmd[0] == 'V'){
                     sscanf(newCmd, "V%f", &maxSpeed);
@@ -91,7 +91,7 @@ void commInFn(){
             //set motor torque
             else if(newCmd[0] == 'T'){
                     sscanf(newCmd, "T%d", &pulseWidth);
-					putMessage(5,pulseWidth);
+                    putMessage(5,pulseWidth);
                 }
         }
     }
@@ -103,36 +103,28 @@ void commOutFn(){
         message_t *pMessage = (message_t*)newEvent.value.p;
         switch(pMessage->code){
             case 1:
-                pc.printf("Hash rate 0x%016x\n\r",
-                pMessage->data);
+                pc.printf("Hash rate 0x%016x\n\r", pMessage->data);
                 break;
             case 2:
-                pc.printf("Hash computed 0x%016x\n\r",
-                pMessage->data);
+                pc.printf("Hash computed 0x%016x\n\r", pMessage->data);
                 break;
             case 3:
-                pc.printf("Motor position %d\n\r",
-                pMessage->data);
+                pc.printf("Motor position %.2f\n\r", pMessage->data);
                 break;
             case 4:
-                pc.printf("Motor velocity %d\n\r",
-                pMessage->data);
+                pc.printf("Motor velocity %.2f\n\r", pMessage->data);
                 break;
             case 5:
-                pc.printf("Max Speed %d\n\r",
-                pMessage->data);
+                pc.printf("Max Speed %.2f\n\r", pMessage->data);
                 break;
             case 6:
-                pc.printf("Position set to %d\n\r",
-                pMessage->data);
+                pc.printf("Position set to %.2f\n\r", pMessage->data);
                 break;
-			case 7:
-				pc.printf("Motor torque set to %d\n\r",
-                pMessage->data);
+            case 7:
+                pc.printf("Motor torque set to %.2f\n\r", pMessage->data);
                 break;
             default:
-                pc.printf("Message %d with data 0x%016x\n\r",
-                pMessage-> code, pMessage->data);
+                pc.printf("Message %d with data 0x%016x\n\r", pMessage-> code, pMessage->data);
         }
         outMessages.free(pMessage);
     }
@@ -267,30 +259,32 @@ void motorCtrlFn(){ // work out whether variable types are correct
     motorCtrlTicker.attach_us(&motorCtrlTick,100000);
     while(1){
         motorCtrlT.signal_wait(0x1);
-		errorSum = 0;
-		for(uint8_t i = 9; i>0; i--) {
-            oldErrors[i] = oldErrors[i-1];
-            errorSum += oldErrors[i];
+        errorSum = 0;
+        for(uint8_t i = 9; i>0; i--) {
+             oldErrors[i] = oldErrors[i-1];
+             errorSum += oldErrors[i];
         }
+        float windingSpeed = maxSpeed*6;
+        float windingRev = newRev*6;
         motorPos = motorPosition;
-        error = newRev*6 + motorPosition_at_command - motorPos; 
+        error = windingRev + motorPosition_at_command - motorPos; 
         if (error >= 0) errorSign = 1;
         else errorSign = -1;
         oldErrors[0] = error*motorTime.read();
         errorSum += oldErrors[0]; 
         motorVelocity_mutex.lock();
-        motorVelocity = (motorPos - oldmotorPosition)/motorTime.read(); 
-		oldmotorPosition = motorPos;
-        ys = kp*(maxSpeed - abs(motorVelocity))*errorSign;
+        motorVelocity = (motorPos - oldmotorPosition)/motorTime.read_us();
+        oldmotorPosition = motorPos;
+        ys = kp*(windingSpeed - abs(motorVelocity))*errorSign;
         motorVelocity_mutex.unlock();
-        yr = kp*error + kd*(error - oldError)/motorTime.read() + ki*errorSum; 
-		motorTime.reset();
+        yr = kp*error + kd*(error - oldError)*10 + ki*errorSum; 
+        motorTime.reset();
         if(yr >= 0) {
             leadyr = 2;
         } else {
             leadyr = -2;
         }
-        if(maxSpeed !=0 ){
+        if(windingSpeed !=0 ){
             if(ys >= 0) {
                 leadys = 2;
             }
@@ -324,9 +318,9 @@ void motorCtrlFn(){ // work out whether variable types are correct
                 lead = leadyr;
             }
         }
-		// "Jump-starts" the motor from a stationary position
-        if((motorVelocity == 0) && ((error >= 6)||(error <= -6))) { 
-			// Allows the motor to "jump start" when the direction is negative
+        // "Jump-starts" the motor from a stationary position
+        if((motorVelocity == 0) && ((error >= 3)||(error <= -3))) { 
+            // Allows the motor to "jump start" when the direction is negative
             if(lead == -2){ 
                 lead = -1;
             }
@@ -336,9 +330,9 @@ void motorCtrlFn(){ // work out whether variable types are correct
         counter++;
         if(counter == 10){
             counter = 0;
-            putMessage(3,motorPos);
+            putMessage(3,motorPos/6.0);
             motorVelocity_mutex.lock();
-            putMessage(4,motorVelocity);
+            putMessage(4,motorVelocity/6.0);
             motorVelocity_mutex.unlock();
         }
         oldError = error; 
@@ -353,30 +347,6 @@ void calcHashRate() {
     putMessage (1, hashCount);
     hashCount = 0;
 }
-
-
-/*char command;
-char buffer[32];
-void rxCallback() {
-    command = pc.getc();
-    if (command == 'R'){
-        printf("%c\n\r", command);
-    }
-    if (command == 'V'){
-        printf("%c\n\r", command);
-    }
-    if (command == 'K'){
-        printf("%c\n\r", command);
-    }
-    if (command == 'T'){
-        printf("%c\n\r", command);
-    }
-}*/
-
-//void serialISR(){
-//        uint8_t newChar = pc.getc();
-//        inCharQ.put((void*)newChar);
-//    }
 
 // -------------------------------------------------------------------------------------------------------------------------
 //Main
@@ -412,10 +382,7 @@ int main() {
         0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
     
     
-   //  uint64_t* key = (uint64_t*)((int)sequence + 48);
-   newKey_mutex.lock();
-   uint64_t key = newKey;
-   newKey_mutex.unlock();
+    uint64_t* key = (uint64_t*)((int)sequence + 48);
     uint64_t* nonce = (uint64_t*)((int)sequence + 56);
     uint8_t hash[32];
     
@@ -425,16 +392,14 @@ int main() {
     
     //uint32_t dummyhash = 0;
     while (1) {
+        newKey_mutex.lock();
+        *key = newKey;
+        newKey_mutex.unlock();
         mine.computeHash(hash, sequence, 64);
         hashCount = hashCount + 1;
         if (hash[0] == 0 && hash[1] == 0){
             putMessage(2, *nonce);
         }
         *nonce = *nonce + 1;
-        /*dummyhash = dummyhash + 1;
-        if (dummyhash % 2000000 == 0){
-            putMessage (2,123);
-            dummyhash = 0;
-        }*/
     }
 }
