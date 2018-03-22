@@ -31,7 +31,6 @@ volatile float maxSpeed = 300;
 uint32_t pulseWidth;
 float motorPosition_at_command;
 float motorPosition;
-float smallMotorPosition;
 
 Mutex newKey_mutex;
 
@@ -160,7 +159,6 @@ int8_t lead = -2;  //2 for forwards, -2 for backwards
 
 
 int32_t motorVelocity;
-int32_t counter=0;
 
 void motorCtrlTick(){
  motorCtrlT.signal_set(0x1);
@@ -173,12 +171,6 @@ DigitalOut led1(LED1);
 InterruptIn I1(I1pin);
 InterruptIn I2(I2pin);
 InterruptIn I3(I3pin);
-
-// Incremental photointerrupter inputs
-InterruptIn I4(CHA);
-InterruptIn I5(CHB);
-// Fraction of one large step of one incremental step
-const float SMALL_STEP = 6/1112;
 
 //Motor Drive outputs
 PwmOut L1L(L1Lpin);
@@ -218,7 +210,7 @@ inline int8_t readRotorState(){
 
 //Basic synchronisation routine    
 int8_t motorHome() {
-    //Put the motor in drive state 0 and wait for it to stabilise
+    //Put the motor in drive state 0 and wait for it to stabilize
     L1L.period_us(2000);
     L2L.period_us(2000);
     L3L.period_us(2000);
@@ -243,24 +235,8 @@ void motorISR() {
     oldRotorState = rotorState;
 }
 
-const int8_t smallStateMap[] = {0x00,0x03,0x01,0x02};  
-
-//Convert photointerrupter inputs to a rotor state
-inline int8_t readSmallRotorState(){
-    return smallStateMap[I3 + 2*I4];
-}
-
-void smallISR() {
-    static int oldSmallRotorState;
-    int8_t smallRotorState = readSmallRotorState();
-    if (smallRotorState - oldSmallRotorState == 3) smallMotorPosition--;
-    else if (smallRotorState - oldSmallRotorState == -3) smallMotorPosition++;
-    else smallMotorPosition += (smallRotorState - oldSmallRotorState);
-    oldSmallRotorState = smallRotorState;
-    if(abs(smallMotorPosition) >= 1112/6) smallMotorPosition = 0;
-}
-
 void motorCtrlFn(){ // work out whether variable types are correct 
+	int32_t counter=0;
     static int32_t oldmotorPosition;
     int32_t error = 0; // Difference between current position and specified position
     int32_t oldError = 0;
@@ -270,6 +246,8 @@ void motorCtrlFn(){ // work out whether variable types are correct
     motorTime.start();
     // local copy of motorPosition to avoid concurrent access
     float motorPos;
+	float windingSpeed;
+	float windingRev;
     float ys; // proportional motor speed controller
     float yr; // differential motor position controller
     float kp = 15; // proportional constant of speed controller
@@ -288,10 +266,10 @@ void motorCtrlFn(){ // work out whether variable types are correct
              oldErrors[i] = oldErrors[i-1];
              errorSum += oldErrors[i];
         }
-        float windingSpeed = maxSpeed*6;
-        float windingRev = newRev*6;
-        motorPos = motorPosition;// + smallMotorPosition*SMALL_STEP;
-        motorVelocity = (motorPos - oldmotorPosition)/motorTime.read();
+        windingSpeed = maxSpeed*6;
+        windingRev = newRev*6;
+        motorPos = motorPosition;
+        motorVelocity = (motorPos - oldmotorPosition)/motorTime.read(); 
         error = windingRev + motorPosition_at_command - motorPos; 
         if (error >= 0) errorSign = 1;
         else errorSign = -1;
@@ -352,7 +330,6 @@ void motorCtrlFn(){ // work out whether variable types are correct
             counter = 0;
             putMessage(3,(float)(motorPos/6.0));
             putMessage(4,(float)(motorVelocity/6.0));
-            putMessage(3,SMALL_STEP);
         }
         oldError = error; 
     }
@@ -371,9 +348,8 @@ void calcHashRate() {
 //Main
 int main() {
     //set up pwm period
-    
-    motorCtrlT.start(motorCtrlFn);
     pc.printf("Rotor origin: %x\n\r", orState);
+    motorCtrlT.start(motorCtrlFn);
     commOutT.start(commOutFn);
     commInT.start(commInFn);
     //pc.attach(&rxCallback);
@@ -387,12 +363,6 @@ int main() {
     I2.fall(&motorISR);
     I3.rise(&motorISR);
     I3.fall(&motorISR);
-    
-    // Small photointerrupter routine
-    I4.rise(&smallISR);
-    I4.fall(&smallISR);
-    I5.rise(&smallISR);
-    I5.fall(&smallISR);
     
     // mining bitcoins
     SHA256 mine;
