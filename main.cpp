@@ -19,6 +19,10 @@
 #define L3Lpin D9           //0x10
 #define L3Hpin D10          //0x20
 
+#define Testpin D13
+
+DigitalOut tpin(Testpin);
+
 Thread commOutT(osPriorityNormal,1024);
 Thread commInT(osPriorityNormal,1024);
 Thread motorCtrlT(osPriorityNormal,1024);
@@ -39,6 +43,7 @@ Mutex newKey_mutex;
 typedef struct{
     uint8_t code;
     float data;
+    uint64_t longData;
     } message_t;
     
 Mail<message_t,16> outMessages;
@@ -60,12 +65,12 @@ void putMessage(uint8_t code, float data){
 void putMessage(uint8_t code, uint64_t data){
     message_t *pMessage = outMessages.alloc();
     pMessage -> code = code;
-    pMessage -> data = data;
+    pMessage -> longData = data;
     outMessages.put(pMessage);
 }
 
 void commInFn(){
-    // array to hold each command 
+    // array to hold each command
     uint8_t N = 50;
     char newCmd[N];
     uint8_t idx = 0;
@@ -82,8 +87,8 @@ void commInFn(){
              if (newCmd[0] == 'K'){
                 newKey_mutex.lock();
                 sscanf(newCmd, "K%x", &newKey); //Decode the command
-                newKey_mutex.unlock();
                 putMessage(8,newKey); 
+                newKey_mutex.unlock();
             }
             else if(newCmd[0] == 'R'){
                     sscanf(newCmd, "R%f", &newRev); 
@@ -99,7 +104,7 @@ void commInFn(){
     }
 }
 
-void commOutFn(){   
+void commOutFn(){
     while (1) {
         osEvent newEvent = outMessages.get();
         message_t *pMessage = (message_t*)newEvent.value.p;
@@ -108,7 +113,7 @@ void commOutFn(){
                 pc.printf("Hash rate %.0f\n\r", pMessage->data);
                 break;
             case 2:
-                pc.printf("Hash computed at 0x%016x\n\r", pMessage->data);
+                pc.printf("Hash computed at 0x%016x\n\r", pMessage->longData);
                 break;
             case 3:
                 pc.printf("Motor position %.2f\n\r", pMessage->data);
@@ -123,7 +128,7 @@ void commOutFn(){
                 pc.printf("Position set to %.2f\n\r", pMessage->data);
                 break;
             case 8:
-                pc.printf("Sequence key set to 0x%016x\n\r", pMessage->data);
+                pc.printf("Sequence key set to 0x%016x\n\r", pMessage->longData);
                 break;
             default:
                 pc.printf("Message %d with data 0x%016x\n\r", pMessage-> code, pMessage->data);
@@ -385,7 +390,6 @@ int main() {
     Ticker t;
     t.attach(&calcHashRate, 1.0);
     
-    //uint32_t dummyhash = 0;
     while (1) {
         newKey_mutex.lock();
         *key = newKey;
