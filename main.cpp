@@ -77,24 +77,24 @@ void commInFn(){
         if(idx == N-1) pc.printf("Incoming string is too long!\n\r");
         idx++;
         if(newChar == '\r'){
-             newCmd[idx] = '\0';
-             idx = 0;
-             if (newCmd[0] == 'K'){
-                newKey_mutex.lock();
-                sscanf(newCmd, "K%x", &newKey); //Decode the command
-                newKey_mutex.unlock();
-                putMessage(8,newKey); 
+            newCmd[idx] = '\0';
+            idx = 0;
+            if (newCmd[0] == 'K'){
+				newKey_mutex.lock();
+				sscanf(newCmd, "K%x", &newKey); //Decode the command
+				newKey_mutex.unlock();
+				putMessage(8,newKey); 
             }
             else if(newCmd[0] == 'R'){
-                    sscanf(newCmd, "R%f", &newRev); 
-                    putMessage(6,newRev); 
-                    motorPosition_at_command = motorPosition;
+                sscanf(newCmd, "R%f", &newRev); 
+                putMessage(6,newRev); 
+                motorPosition_at_command = motorPosition;
             }
             else if(newCmd[0] == 'V'){
-                    sscanf(newCmd, "V%f", &maxSpeed);
-                    //pulseWidth = /newSpeed
-                    putMessage(5,maxSpeed);
-                }
+                sscanf(newCmd, "V%f", &maxSpeed);
+                //pulseWidth = /newSpeed
+                putMessage(5,maxSpeed);
+            }
         }
     }
 }
