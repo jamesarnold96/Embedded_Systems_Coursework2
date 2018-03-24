@@ -19,11 +19,17 @@
 #define L3Lpin D9           //0x10
 #define L3Hpin D10          //0x20
 
+//Debug pin
+#define Testpin D13
+
+DigitalOut tpin(Testpin);
+
 Thread commOutT(osPriorityNormal,1024);
 Thread commInT(osPriorityNormal,1024);
 Thread motorCtrlT(osPriorityNormal,1024);
 RawSerial pc(SERIAL_TX, SERIAL_RX);
-// Serial pc(SERIAL_TX, SERIAL_RX);
+
+//Global variables
 Queue<void,8> inCharQ;
 volatile uint64_t newKey;
 volatile float newRev;
@@ -39,6 +45,7 @@ Mutex newKey_mutex;
 typedef struct{
     uint8_t code;
     float data;
+    uint64_t longData;
     } message_t;
     
 Mail<message_t,16> outMessages;
@@ -60,12 +67,13 @@ void putMessage(uint8_t code, float data){
 void putMessage(uint8_t code, uint64_t data){
     message_t *pMessage = outMessages.alloc();
     pMessage -> code = code;
-    pMessage -> data = data;
+    pMessage -> longData = data;
     outMessages.put(pMessage);
 }
 
+// Handles all inputs through serial port
 void commInFn(){
-    // array to hold each command 
+    // array to hold each command
     uint8_t N = 50;
     char newCmd[N];
     uint8_t idx = 0;
@@ -74,9 +82,14 @@ void commInFn(){
         osEvent newEvent = inCharQ.get();
         uint8_t newChar = (uint8_t)newEvent.value.p;
         newCmd[idx] = newChar;
-        if(idx == N-1) pc.printf("Incoming string is too long!\n\r");
-        idx++;
+        if(idx == N-1) {
+            pc.printf("Incoming string is too long!\n\r");
+            idx = 0;
+        } else {
+            idx++;
+        }
         if(newChar == '\r'){
+<<<<<<< HEAD
             newCmd[idx] = '\0';
             idx = 0;
             if (newCmd[0] == 'K'){
@@ -84,6 +97,15 @@ void commInFn(){
 				sscanf(newCmd, "K%x", &newKey); //Decode the command
 				newKey_mutex.unlock();
 				putMessage(8,newKey); 
+=======
+             newCmd[idx] = '\0';
+             idx = 0;
+             if (newCmd[0] == 'K'){
+                newKey_mutex.lock();
+                sscanf(newCmd, "K%x", &newKey); //Decode the command
+                putMessage(8,newKey); 
+                newKey_mutex.unlock();
+>>>>>>> 7300c4abfb514810d71e0bf7c5c8c28f9a887a49
             }
             else if(newCmd[0] == 'R'){
                 sscanf(newCmd, "R%f", &newRev); 
@@ -99,7 +121,8 @@ void commInFn(){
     }
 }
 
-void commOutFn(){   
+// Handles all outputs through the serial port
+void commOutFn(){
     while (1) {
         osEvent newEvent = outMessages.get();
         message_t *pMessage = (message_t*)newEvent.value.p;
@@ -108,7 +131,7 @@ void commOutFn(){
                 pc.printf("Hash rate %.0f\n\r", pMessage->data);
                 break;
             case 2:
-                pc.printf("Hash computed at 0x%016x\n\r", pMessage->data);
+                pc.printf("Hash computed at 0x%016x\n\r", pMessage->longData);
                 break;
             case 3:
                 pc.printf("Motor position %.2f\n\r", pMessage->data);
@@ -123,7 +146,7 @@ void commOutFn(){
                 pc.printf("Position set to %.2f\n\r", pMessage->data);
                 break;
             case 8:
-                pc.printf("Sequence key set to 0x%016x\n\r", pMessage->data);
+                pc.printf("Sequence key set to 0x%016x\n\r", pMessage->longData);
                 break;
             default:
                 pc.printf("Message %d with data 0x%016x\n\r", pMessage-> code, pMessage->data);
@@ -223,8 +246,6 @@ int8_t motorHome() {
 
 //orState is subtracted from future rotor state inputs to align rotor and motor states   
 int8_t orState = motorHome();
-//int8_t intState = 0;
-//int32_t motorPosition;
 void motorISR() {
     static int8_t oldRotorState;
     int8_t rotorState = readRotorState();
@@ -266,19 +287,24 @@ void motorCtrlFn(){ // work out whether variable types are correct
              oldErrors[i] = oldErrors[i-1];
              errorSum += oldErrors[i];
         }
+        // control algorithm
+        // convert state change into rotations
         windingSpeed = maxSpeed*6;
         windingRev = newRev*6;
         motorPos = motorPosition;
-        motorVelocity = (motorPos - oldmotorPosition)/motorTime.read(); 
+        motorVelocity = (motorPos - oldmotorPosition)/motorTime.read();
+        // calculate errors
         error = windingRev + motorPosition_at_command - motorPos; 
         if (error >= 0) errorSign = 1;
         else errorSign = -1;
         oldErrors[0] = error*motorTime.read();
         errorSum += oldErrors[0]; 
         oldmotorPosition = motorPos;
+        // control equaltions
         ys = kp*(windingSpeed - abs(motorVelocity))*errorSign;
         yr = kp*error + kd*(error - oldError)/motorTime.read() + ki*errorSum; 
         motorTime.reset();
+        // direction and speed cap
         if(yr >= 0) {
             leadyr = 2;
         } else {
@@ -300,6 +326,7 @@ void motorCtrlFn(){ // work out whether variable types are correct
         } else {
             ys = 1000;
         }
+        // pick the slower one to limit speed to maxSpeed
         if(motorVelocity < 0){
             if(ys >= yr){
                 pulseWidth = abs(ys);
@@ -325,6 +352,7 @@ void motorCtrlFn(){ // work out whether variable types are correct
             }
             motorISR();
         }
+        // Serial output to monitor speed and position
         counter++;
         if(counter == 10){
             counter = 0;
@@ -385,8 +413,8 @@ int main() {
     Ticker t;
     t.attach(&calcHashRate, 1.0);
     
-    //uint32_t dummyhash = 0;
     while (1) {
+        // mining
         newKey_mutex.lock();
         *key = newKey;
         newKey_mutex.unlock();
